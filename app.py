@@ -7,31 +7,86 @@ from tools.final_answer import FinalAnswerTool
 
 from Gradio_UI import GradioUI
 
-# Below is an example of a tool that does nothing. Amaze us with your creativity !
 @tool
-def my_custom_tool(arg1:str, arg2:int)-> str: #it's import to specify the return type
-    #Keep this format for the description / args / args description but feel free to modify the tool
-    """A tool that does nothing yet 
-    Args:
-        arg1: the first argument
-        arg2: the second argument
+def evaluar_codigo_python(codigo_estudiante: str) -> str:
     """
-    return "What magic will you build ?"
+    Ejecuta el código Python proporcionado por el estudiante y devuelve la salida o los errores.
+    Útil para probar si la lógica del estudiante funciona correctamente.
+    
+    Args:
+        codigo_estudiante: El código fuente en Python que se va a ejecutar.
+    """
+    # Redirigimos la salida estándar para capturar los 'prints' y evitar que se impriman en la consola del servidor
+    old_stdout = sys.stdout
+    redirected_output = sys.stdout = io.StringIO()
+    
+    entorno_local = {}
+    
+    try:
+        # Ejecutamos el código en un entorno aislado (a nivel de variables)
+        exec(codigo_estudiante, entorno_local)
+        salida = redirected_output.getvalue()
+        
+        if not salida:
+            return "✅ El código se ejecutó sin errores sintácticos, pero no produjo ninguna salida (no hay prints)."
+        else:
+            return f"✅ Ejecución exitosa. Salida del código:\n{salida}"
+            
+    except Exception as e:
+        # Capturamos errores de sintaxis, indentación, lógica, etc.
+        return f"❌ Error al ejecutar el código: {type(e).__name__}: {str(e)}"
+    finally:
+        # Restauramos la salida estándar
+        sys.stdout = old_stdout
+
 
 @tool
-def get_current_time_in_timezone(timezone: str) -> str:
-    """A tool that fetches the current local time in a specified timezone.
+def buscar_teoria_python(concepto: str, ruta_pdf: str = "fundamentos_python.pdf") -> str:
+    """
+    Busca información teórica sobre fundamentos de Python dentro del libro de texto del curso (PDF).
+    Útil cuando el estudiante pide explicar un concepto teórico (ej. qué es una lista, un ciclo for, etc.).
+    
     Args:
-        timezone: A string representing a valid timezone (e.g., 'America/New_York').
+        concepto: El término clave o concepto que el estudiante quiere aprender o repasar.
+        ruta_pdf: (Opcional) La ruta local al archivo PDF. Por defecto es 'fundamentos_python.pdf'.
     """
     try:
-        # Create timezone object
-        tz = pytz.timezone(timezone)
-        # Get current time in that timezone
-        local_time = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
-        return f"The current local time in {timezone} is: {local_time}"
+        resultados = []
+        # Expresión regular para buscar la palabra completa (ignorando mayúsculas/minúsculas)
+        patron = re.compile(r'\b' + re.escape(concepto) + r'\b', re.IGNORECASE)
+        
+        with open(ruta_pdf, 'rb') as archivo:
+            lector_pdf = PyPDF2.PdfReader(archivo)
+            
+            # Recorremos todas las páginas del PDF
+            for num_pagina, pagina in enumerate(lector_pdf.pages):
+                texto_pagina = pagina.extract_text()
+                
+                if texto_pagina and patron.search(texto_pagina):
+                    # Extraemos un fragmento alrededor de la coincidencia para dar contexto
+                    lineas = texto_pagina.split('\n')
+                    for i, linea in enumerate(lineas):
+                        if patron.search(linea):
+                            # Tomamos la línea anterior, la actual y la siguiente como contexto
+                            inicio = max(0, i - 2)
+                            fin = min(len(lineas), i + 3)
+                            contexto = " ".join(lineas[inicio:fin])
+                            resultados.append(f"Página {num_pagina + 1}: ...{contexto}...")
+                            break # Solo tomamos la primera coincidencia por página para no saturar
+                            
+                # Limitamos a 3 resultados para no exceder el límite de tokens del LLM
+                if len(resultados) >= 3:
+                    break
+                    
+        if resultados:
+            return f"He encontrado la siguiente información sobre '{concepto}' en el material:\n" + "\n\n".join(resultados)
+        else:
+            return f"No encontré información específica sobre '{concepto}' en el PDF base. Explícalo basándote en tus conocimientos generales de Python 3."
+            
+    except FileNotFoundError:
+        return f"Error: No se encontró el archivo PDF en la ruta '{ruta_pdf}'. Verifica que esté subido a tu Space de Hugging Face."
     except Exception as e:
-        return f"Error fetching time for timezone '{timezone}': {str(e)}"
+        return f"Error al leer el PDF: {str(e)}"
 
 
 final_answer = FinalAnswerTool()
@@ -42,7 +97,7 @@ final_answer = FinalAnswerTool()
 model = HfApiModel(
 max_tokens=2096,
 temperature=0.5,
-model_id='Qwen/Qwen2.5-Coder-32B-Instruct',# it is possible that this model may be overloaded
+model_id='Meta-Llama-3-8B-Instruct',
 custom_role_conversions=None,
 )
 
@@ -55,7 +110,7 @@ with open("prompts.yaml", 'r') as stream:
     
 agent = CodeAgent(
     model=model,
-    tools=[final_answer], ## add your tools here (don't remove final answer)
+    tools=[evaluar_codigo_python, buscar_teoria_python, final_answer], ## add your tools here (don't remove final answer)
     max_steps=6,
     verbosity_level=1,
     grammar=None,
