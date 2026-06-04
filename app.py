@@ -47,50 +47,119 @@ def evaluate_student_code(student_code: str) -> str:
 def search_python_theory(concept: str, pdf_path: str = "python_fundamentals.pdf") -> str:
     """
     Searches for academic information about Python fundamentals in the course textbook (PDF).
-    Useful when the student asks to explain a theoretical concept (e.g., lists, for loops, dictionaries).
+    Can find specific concepts (e.g., lists, for loops) or provide a general table of contents/summary
+    if the concept requested is broad (e.g., 'summary', 'table of contents', 'index', 'python fundamentals').
     
     Args:
-        concept: The keyword or concept the student wants to learn or review.
+        concept: The keyword, concept, or query the student wants to search for (e.g., 'lists', 'summary').
         pdf_path: (Optional) The local path to the PDF file. Defaults to 'python_fundamentals.pdf'.
     """
     try:
-        results = []
-        # Case-insensitive word-boundary regex pattern
-        pattern = re.compile(r'\b' + re.escape(concept) + r'\b', re.IGNORECASE)
+        concept_clean = concept.strip().lower()
+        
+        # --- ESTRATEGIA 1: Petición de Resumen o Tabla de Contenidos ---
+        # Si el estudiante (o el agente) busca términos generales, extraemos el inicio del libro.
+        summary_keywords = ["summary", "overview", "table of contents", "index", "toc", "introduction", "python fundamentals", "fundamentals", "resumen", "indice", "índice"]
+        is_summary_request = any(kw in concept_clean for kw in summary_keywords) or len(concept_clean) < 3
         
         with open(pdf_path, 'rb') as file:
             pdf_reader = PyPDF2.PdfReader(file)
+            num_pages = len(pdf_reader.pages)
             
-            # Iterate through all pages of the PDF
+            if is_summary_request:
+                summary_text = []
+                # Leemos las primeras 5 páginas (usualmente donde está el índice o la introducción)
+                pages_to_read = min(5, num_pages) 
+                for page_num in range(pages_to_read):
+                    page_text = pdf_reader.pages[page_num].extract_text()
+                    if page_text:
+                        # Tomamos las primeras 30 líneas de cada página
+                        lines = page_text.split('\n')[:30]
+                        summary_text.append(f"--- Page {page_num + 1} Index/TOC Section --- \n" + "\n".join(lines))
+                
+                return (
+                    "Here is an overview of the Table of Contents and introductory structure of the textbook:\n\n" + 
+                    "\n\n".join(summary_text) + 
+                    "\n\nUse this index outline to find specific concepts (e.g., search for 'lists' or 'dictionary' in your next steps)!"
+                )
+            
+            results = []
+            
+            # --- ESTRATEGIA 2: Búsqueda Estricta (Coincidencia exacta de palabras) ---
+            # Busca la palabra o frase exacta respetando los límites de palabras (\b)
+            pattern = re.compile(r'\b' + re.escape(concept) + r'\b', re.IGNORECASE)
             for page_num, page in enumerate(pdf_reader.pages):
                 page_text = page.extract_text()
+                if not page_text:
+                    continue
                 
-                if page_text and pattern.search(page_text):
-                    # Extract context around the matching keyword
+                if pattern.search(page_text):
                     lines = page_text.split('\n')
                     for i, line in enumerate(lines):
                         if pattern.search(line):
-                            # Take two lines before and after for surrounding context
                             start = max(0, i - 2)
                             end = min(len(lines), i + 3)
                             context = " ".join(lines[start:end])
                             results.append(f"Page {page_num + 1}: ...{context}...")
-                            break # Limit to one match per page to save token space
-                            
-                # Restrict to a maximum of 3 page results to prevent token limit overflows
+                            break # Solo un resultado por página para no saturar
                 if len(results) >= 3:
                     break
-                    
-        if results:
-            return f"Found the following information about '{concept}' in the course materials:\n" + "\n\n".join(results)
-        else:
-            return f"No specific information about '{concept}' found in the reference PDF. Please explain using your general Python 3 knowledge."
             
+            # --- ESTRATEGIA 3: Búsqueda Relajada (Substring Match) ---
+            # Si no encontró nada exacto, busca ignorando los saltos de línea molestos de los PDFs
+            if not results:
+                for page_num, page in enumerate(pdf_reader.pages):
+                    page_text = page.extract_text()
+                    if not page_text:
+                        continue
+                    
+                    if concept_clean in page_text.lower():
+                        lines = page_text.split('\n')
+                        for i, line in enumerate(lines):
+                            if concept_clean in line.lower():
+                                start = max(0, i - 2)
+                                end = min(len(lines), i + 3)
+                                context = " ".join(lines[start:end])
+                                results.append(f"Page {page_num + 1} (Fuzzy Match): ...{context}...")
+                                break
+                    if len(results) >= 3:
+                        break
+                        
+            # --- ESTRATEGIA 4: Búsqueda por Intersección de Palabras Clave ---
+            # Si era una frase larga (ej. "funciones recursivas basicas"), la divide y busca las páginas que tengan todas esas palabras
+            if not results:
+                stopwords = {"a", "an", "the", "in", "of", "to", "for", "with", "on", "at", "by", "about", "and", "or", "is", "are", "el", "la", "los", "las", "un", "una", "de", "en"}
+                keywords = [word for word in concept_clean.split() if word not in stopwords and len(word) > 2]
+                
+                if keywords:
+                    for page_num, page in enumerate(pdf_reader.pages):
+                        page_text = page.extract_text()
+                        if not page_text:
+                            continue
+                        
+                        # Revisa si TODAS las palabras clave están en la página
+                        if all(kw in page_text.lower() for kw in keywords):
+                            lines = page_text.split('\n')
+                            for i, line in enumerate(lines):
+                                # Muestra como contexto la línea donde aparece al menos una palabra clave
+                                if any(kw in line.lower() for kw in keywords):
+                                    start = max(0, i - 2)
+                                    end = min(len(lines), i + 3)
+                                    context = " ".join(lines[start:end])
+                                    results.append(f"Page {page_num + 1} (Keyword Match): ...{context}...")
+                                    break
+                        if len(results) >= 3:
+                            break
+                            
+            if results:
+                return f"Found the following information about '{concept}' in the course materials:\n" + "\n\n".join(results)
+            else:
+                return f"No specific matches found for '{concept}' in the reference textbook. Please construct an explanation using your general Python 3 knowledge."
+                
     except FileNotFoundError:
-        return f"Error: The PDF file was not found at '{pdf_path}'. Please ensure it is uploaded to your Hugging Face Space."
+        return f"Error: The PDF file was not found at '{pdf_path}'. Please ensure it is uploaded and named correctly."
     except Exception as e:
         return f"Error reading the PDF: {str(e)}"
-
 
 # Define the final answer tool
 final_answer = FinalAnswerTool()
