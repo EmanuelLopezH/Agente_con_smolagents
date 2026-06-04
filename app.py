@@ -4,8 +4,11 @@ import requests
 import pytz
 import yaml
 from tools.final_answer import FinalAnswerTool
-
 from Gradio_UI import GradioUI
+import re
+import PyPDF2
+import sys
+import io
 
 @tool
 def evaluar_codigo_python(codigo_estudiante: str) -> str:
