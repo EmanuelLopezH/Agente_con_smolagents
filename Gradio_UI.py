@@ -266,13 +266,10 @@ class GradioUI:
             file_uploads_log = gr.State([])
             chatbot = gr.Chatbot(
                 label="Agent",
-                type="messages",
                 avatar_images=(
                     None,
                     "https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/communication/Alfred.png",
                 ),
-                resizeable=True,
-                scale=1,
             )
             # If an upload folder is provided, enable the upload feature
             if self.file_upload_folder is not None:

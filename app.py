@@ -6,7 +6,7 @@ import sys
 import pytz
 import yaml
 import PyPDF2
-from smolagents import CodeAgent, DuckDuckGoSearchTool, HfApiModel, load_tool, tool
+from smolagents import CodeAgent, DuckDuckGoSearchTool, load_tool, tool, OpenAIModel
 from tools.final_answer import FinalAnswerTool
 from Gradio_UI import GradioUI
 
@@ -73,8 +73,8 @@ def search_python_theory(concept: str, pdf_path: str = "python_fundamentals.pdf"
                 for page_num in range(pages_to_read):
                     page_text = pdf_reader.pages[page_num].extract_text()
                     if page_text:
-                        # Tomamos las primeras 30 líneas de cada página
-                        lines = page_text.split('\n')[:30]
+                        # Tomamos las primeras 70 líneas de cada página
+                        lines = page_text.split('\n')[:70]
                         summary_text.append(f"--- Page {page_num + 1} Index/TOC Section --- \n" + "\n".join(lines))
                 
                 return (
@@ -165,11 +165,17 @@ def search_python_theory(concept: str, pdf_path: str = "python_fundamentals.pdf"
 final_answer = FinalAnswerTool()
 
 # Model configuration using Qwen Coder
-model = HfApiModel(
-    max_tokens=2096,
-    temperature=0.5,
-    model_id="Qwen/Qwen2.5-Coder-32B-Instruct",
-    custom_role_conversions=None,
+# model = HfEngine(
+#     max_tokens=2096,
+#     temperature=0.5,
+#     model_id="Qwen/Qwen2.5-Coder-32B-Instruct",
+#     custom_role_conversions=None,
+# )
+# model = InferenceClientModel(model_id="Qwen/Qwen2.5-7B-Instruct", )
+model = OpenAIModel(
+    model_id="qwen2.5:7b",
+    api_base="http://localhost:11434/v1", # Redirige el tráfico a Ollama en tu PC
+    api_key="ollama" # Ollama no pide contraseña real, pero la clase requiere que enviemos algo
 )
 
 # Load helper tools (e.g., text-to-image generator from Hub)
@@ -185,13 +191,8 @@ agent = CodeAgent(
     tools=[evaluate_student_code, search_python_theory, final_answer],
     max_steps=6,
     verbosity_level=1,
-    grammar=None,
-    planning_interval=None,
-    name="PythonTutorAgent",
-    description="An AI academic tutor to assist students in mastering Python Programming Fundamentals.",
     prompt_templates=prompt_templates
 )
-
 # Launch the interactive Web UI
 if __name__ == "__main__":
     GradioUI(agent).launch()
